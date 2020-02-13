@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,12 +30,14 @@ const (
 )
 
 var (
-	requestTimeout  time.Duration
-	flavorName      string
-	imageName       string
-	internalNetwork string
-	externalNetwork string
-	userName        string
+	requestTimeout     time.Duration
+	flavorName         string
+	imageName          string
+	internalNetwork    string
+	externalNetwork    string
+	userName           string
+	disableObjectStore bool
+	disableInstance    bool
 )
 
 func metricsHandler(w http.ResponseWriter, r *http.Request) {
@@ -48,25 +51,29 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 
 	wg := sync.WaitGroup{}
 
-	// Spawn a server and ssh into it
-	wg.Add(1)
-	go func() {
-		start := time.Now()
-		spawnMain(ctx, registry)
-		wg.Done()
-		log.Printf("spawnMain finished in %v", time.Since(start))
-	}()
+	if disableInstance != true {
+		// Spawn a server and ssh into it
+		wg.Add(1)
+		go func() {
+			start := time.Now()
+			spawnMain(ctx, registry)
+			wg.Done()
+			log.Printf("spawnMain finished in %v", time.Since(start))
+		}()
+	}
 
-	// Upload and download a file from the object store
-	wg.Add(1)
-	go func() {
-		start := time.Now()
-		objectStoreMain(ctx, registry)
-		wg.Done()
-		log.Printf("objectStoreMain finished in %v", time.Since(start))
-	}()
+	if disableObjectStore != true {
+		// Upload and download a file from the object store
+		wg.Add(1)
+		go func() {
+			start := time.Now()
+			objectStoreMain(ctx, registry)
+			wg.Done()
+			log.Printf("objectStoreMain finished in %v", time.Since(start))
+		}()
 
-	wg.Wait()
+		wg.Wait()
+	}
 
 	promhttp.HandlerFor(registry, promhttp.HandlerOpts{}).ServeHTTP(w, r)
 }
@@ -130,8 +137,16 @@ func main() {
 	flag.StringVar(&internalNetwork, "internal-network", "private", "name of the internal network")
 	flag.StringVar(&externalNetwork, "external-network", "internet", "name of the external network")
 	flag.StringVar(&userName, "user", "ubuntu", "username used for sshing into the instance")
+	flag.BoolVar(&disableObjectStore, "disable-objectstore", false, "disable object store")
+	flag.BoolVar(&disableInstance, "disable-instance", false, "disable instance")
 
 	flag.Parse()
+
+	// Check environment variables values
+	for _, e := range os.Environ() {
+		pair := strings.SplitN(e, "=", 2)
+		fmt.Println(pair[0])
+	}
 
 	// Launch our garbage collector in its own goroutine
 
